@@ -1,0 +1,5 @@
+- name: sysctl update
+  service:
+    name: "systemd-sysctl.service"
+    state: restarted
+

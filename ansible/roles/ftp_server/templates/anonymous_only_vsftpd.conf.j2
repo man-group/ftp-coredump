@@ -1,0 +1,21 @@
+# Note: anon_root folder cannot be writable by ftp user, otherwise you will get:
+# 500 OOPS: vsftpd: refusing to run with writable root inside chroot()
+
+anon_mkdir_write_enable=YES
+anon_root={{ ftp_server_base }}
+anon_umask=022
+anon_upload_enable=YES
+chown_upload_mode=0664
+connect_from_port_20=YES
+dirmessage_enable=YES
+ftpd_banner=Welcome to AHL core dump server
+hide_ids=YES
+listen_ipv6=NO
+listen=YES
+no_anon_password=YES
+pam_service_name=vsftpd
+tcp_wrappers=YES
+userlist_enable=YES
+write_enable=YES
+xferlog_enable=YES
+xferlog_std_format=YES

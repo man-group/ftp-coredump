@@ -1,0 +1,14 @@
+
+# Core pattern
+sysctls_kernel_core_pattern: "|/usr/local/bin/ftp-coredump.sh core.%e.%h.%p.%t"
+
+# Change these settings
+core_ftp_server: "ftp.myorg.com"
+core_ftp_user: "ftp"
+core_ftp_pass: "ftp"
+
+# Path to drop the files in, relative to the login directory of the ftp user
+core_ftp_remote_dir: "cores"
+
+# Seconds before ncftp will time out
+core_ftp_upload_timeout: "15"

@@ -1,0 +1,21 @@
+
+- name: Add sysctl template
+  template: 
+    src: "core_location.j2"
+    dest: "/etc/sysctl.d/core_location.conf"
+    owner: root
+    group: root
+    mode: 0644
+  notify:
+    - sysctl update
+
+- name: Distribute ftp core dump script
+  template:
+    src: "ftp-coredump.sh.j2"
+    dest: "/usr/local/bin/ftp-coredump.sh"
+    mode: 0755
+
+- name: Add ncftp for the ftp core dump script
+  yum:
+    name: "ncftp"
+    state: latest

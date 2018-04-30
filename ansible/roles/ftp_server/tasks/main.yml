@@ -1,0 +1,22 @@
+---
+
+- name: Installing vsftpd
+  yum:
+    name: vsftpd
+    state: present
+
+- name: Deploying configuration file
+  template:
+    src: templates/anonymous_only_vsftpd.conf.j2
+    dest: /etc/vsftpd/vsftpd.conf
+    owner: root
+    group: root
+    mode: 0600
+  notify:
+    - Restarting vsftpd
+
+- name: Enabling and starting vsftpd service
+  service:
+    name: vsftpd
+    enabled: yes
+    state: started

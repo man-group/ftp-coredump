@@ -1,0 +1,91 @@
+#!/bin/bash
+#
+# Reads a core file from stdin and sends it to an FTP server.
+#
+# The name of the core file is passed as a command line parameter
+# to the script. Typically, the core_pattern will use a set of 
+# substitution parameters to build up a file name. A subset of 
+# valid core_pattern substitutions are displayed below: 
+#
+#   Executable name                  (%e)
+#   Host name (or container name)    (%h)
+#   Pid in its namespace             (%p) 
+#   Pid in global NS                 (%P)
+#   Timestamp (seconds)              (%t)
+# 
+#
+# In short, to get this to work, do the following:
+#
+# Client side:
+#
+# Set the core pattern to something like:
+#   "|/usr/local/bin/ftp-coredump.sh core.%e.%h.%p.%P.%t"
+#
+# 
+# Server side:
+#
+# Configure an FTP server that supports anonymous uploads to
+# some directory. The anon user also needs to have permissions
+# to create directories, so that the core files can be separated
+# by directory. E.g. vsftpd supports these requirements.
+# 
+#
+# The filename on the remote server will be generated as:
+#    <basepath>/real_hostname/<the_file_name> 
+#
+#
+# A note on compression:
+#
+# I tested both gzip, bzip2 and xz compression, and as we have such fast storage
+# it makes the whole process slower. The first and foremost goal must be to get
+# the core dump process completed as soon as possible, so therefore I have removed
+# the compression bits.
+#
+# Example: Test core file of 8063352832 bytes. Reading from one openstack
+# machine, with the file in cache, and writing to the FTP server.
+#
+#    Method            | Time
+#    ==================+==========================
+#    no compression    | 20s
+#    bzip2             | many minutes - cancelled
+#    gzip              | 3m39s
+#    gzip -1           | 1m45
+#    xz -1             | 5m37
+#
+
+# filename parameter
+short_fn=$1
+
+# Immediately clone stdin to fd 100 and close stdin to avoid anyone else eating input
+exec 100<&0
+exec 0<&-
+
+# Note, these parameters are ansible-managed.
+# See roles/sysctls/base/templates/ftp-coredump.sh.j2
+remote_host={{ core_ftp_server }}
+ftp_user={{ core_ftp_user|default("ftp") }}
+passwd={{ core_ftp_pass|default("ftp") }}
+remote_basepath={{ core_ftp_remote_dir|default("cores") }}
+ftp_timeout={{ core_ftp_upload_timeout|default("15") }}
+real_hostname=$(hostname)
+
+if [[ -n "$remote_basepath" ]]; then
+    filename="$remote_basepath/$real_hostname/$short_fn"
+else
+    filename="$real_hostname/$short_fn"
+fi
+
+
+# Send the file 
+start_time=$(date +%s)
+ncftpput -t "$ftp_timeout" -m -c "$remote_host" "$filename" < /proc/self/fd/100
+ftp_rv=$?
+end_time=$(date +%s)
+delta_time=$(echo $end_time - $start_time | bc)
+
+# ... and also log to local syslog
+if [[ $ftp_rv -ne 0 ]]; then 
+    logger "Core dump: error: Attempted to dump $filename to ftp://$remote_host, but failed. Spent $delta_time seconds."
+else
+    logger "Core dump: success: Sent $real_hostname/$short_fn to ftp://$remote_host. Spent $delta_time seconds."
+fi

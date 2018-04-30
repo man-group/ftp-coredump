@@ -1,0 +1,4 @@
+---
+
+# This is the base directory of the ftp server (i.e. where files are uploaded)
+ftp_server_base: /scratch/crash/ftp
