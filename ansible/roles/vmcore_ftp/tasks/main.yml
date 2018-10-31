@@ -1,0 +1,47 @@
+- name: Distribute route determining script
+  copy:
+    src: determine-route.sh
+    dest: /usr/local/sbin
+    mode: 0755
+  notify: restart kdump
+
+- name: Run route determining script
+  command: /usr/local/sbin/determine-route.sh
+  register: kdump_route_info
+  changed_when: false
+  check_mode: no
+
+- name: set crashdump interface facts
+  set_fact:
+    crashdump_ftp_use_interface: "{{ kdump_route_info.stdout_lines[0] }}"
+    crashdump_ftp_use_route: "{{ kdump_route_info.stdout_lines[1] }}"
+    crashdump_ftp_fallback_ip: "{{ kdump_route_info.stdout_lines[2] }}"
+
+- name: Set up /etc/kdump.conf
+  template:
+    src: kdump.conf.j2
+    dest: /etc/kdump.conf
+    mode: 0644
+  notify: restart kdump
+
+- name: Distribute pre-crash.sh script
+  template:
+    src: pre-crash.sh.j2
+    dest: /usr/local/sbin/pre-crash.sh
+    mode: 0755
+  register: pre_crash_reg
+  notify: restart kdump
+
+# if the pre-crash.sh script got updated, but not kdump.conf, a restart
+# of kdump on its own (by the notifier) will not rebuild the initramfs,
+# so we touch /etc/kdump.conf to force a rebuild
+- name: Touch /etc/kdump.conf if pre-crash.sh changed
+  file:
+    path: /etc/kdump.conf
+    state: touch
+  when: pre_crash_reg.changed
+
+- name: Install ncftpput for the crash script
+  yum:
+    name: "ncftp"
+    state: latest
