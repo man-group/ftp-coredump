@@ -1,0 +1,150 @@
+#!/bin/bash
+
+# Note, these parameters are ansible-managed
+remote_host="{{ crashdump_ftp_server }}"
+ftp_user=ftp
+passwd=ftp
+remote_basepath="{{ crashdump_ftp_basepath|default('crashdump') }}"
+ftp_timeout="{{ crashdump_ftp_timeout|default('15') }}"
+
+# The ip_interface needs to be one that can DHCP, and route to the ftp server
+ip_interface="{{ crashdump_ftp_use_interface }}"
+ip_default_gw="{{ crashdump_ftp_use_route }}"
+
+# Use this in case dhcp fails (our current IP as determined when ansible ran)
+backup_ip="{{crashdump_ftp_fallback_ip}}"
+
+real_hostname="{{ ansible_nodename }}"
+short_fn=vmcore.$(date +%Y-%m-%d-%H-%M-%S)
+
+
+# Do DHCP, and set up resolv conf + default route (because it is broken in the initramfs)
+do_dhcp()
+{
+    echo "Running dhclient to get an IP"
+    mkdir -p /var/lib/dhclient
+    /sbin/dhclient -lf /var/lib/dhclient/dhclient.lease $ip_interface 
+
+    if [[ $? -ne 0 ]]; then 
+        echo 
+        echo "Failed to determine IP address - falling back to using static IP $backup_ip!"
+
+        ip link set $ip_interface up
+        ip addr add $backup_ip dev $ip_interface
+    fi
+
+    # Populate /etc/resolv.conf, because that is broken in the initramfs...
+    echo
+    echo "Populating /etc/resolv.conf"
+    dhcp_lease=/var/lib/dhclient/dhclient.lease
+    nameservers=""
+    if [[ -f "$dhcp_lease" ]]; then
+        nameservers=`grep domain-name-servers $dhcp_lease | awk ' { print $NF } '  | tr  '[,;]' ' '`    
+    fi
+    if [[ -z "$nameservers" ]]; then
+        nameservers="{{ default_dns_servers }}"
+    fi
+    for i in $nameservers; do 
+        echo "nameserver $i"
+    done | sort | uniq > /etc/resolv.conf
+
+    # Set up default route, because that is broken in the initramfs...
+    echo "Determined default route to be: $ip_default_gw"
+    ip route add default via $ip_default_gw dev $ip_interface
+    echo
+    echo "Route table:"
+    echo
+    ip route 
+
+    echo
+    echo "Contents of /etc/resolv.conf"
+    ls -la /etc/resolv.conf
+    cat /etc/resolv.conf
+}
+
+
+dump_and_transfer()
+{
+    local remote_filename=$1
+    local level=$2
+
+    if [[ -p vmcore-fifo ]]; then
+        # remove vmcore-fifo if it exists
+        rm -f vmcore-fifo
+    fi
+
+    echo "Uploading coredump with -d $level file"
+    mkfifo vmcore-fifo
+    makedumpfile -F -l -d $level /proc/vmcore | tee vmcore-fifo | sha1sum > vmcore.sha1sum &
+    cat vmcore-fifo | /usr/bin/ncftpput -t "$ftp_timeout" -m -c "$remote_host" "$remote_filename"
+    local rv=$?
+
+    # Also upload the checksum
+    echo "Uploading checksum file"
+    cat vmcore.sha1sum | /usr/bin/ncftpput -t "$ftp_timeout" -m -c "$remote_host" "${remote_filename}.sha1sum"
+    # don't care about return value here...
+
+    return $rv
+}
+
+
+do_ftp()
+{
+    echo "Dumping small (-d 31) vmcore to FTP site"
+    if [[ -n "$remote_basepath" ]]; then
+        filename="$remote_basepath/$real_hostname/$short_fn"
+    else
+        filename="$real_hostname/$short_fn"
+    fi
+    
+    # Create fifo to dump to, so that we can generate a checksum, and also upload to FTP
+    start_time=$(date +%s)
+    dump_and_transfer "$filename" 31
+    # If things went wrong, we still keep going anyway...
+    end_time=$(date +%s)
+    delta_time=$(($end_time - $start_time))
+
+    # build a status file and send that too...
+    echo "Uploading info file"
+    (
+        echo
+        echo "Start time: $(date -d @$start_time)"
+        echo "End time: $(date -d @$end_time)"
+        echo "Seconds spent: $delta_time"
+        echo
+        echo "Network info:"
+        echo "IP"
+        ip a
+        echo
+        echo "Routes"
+        ip route
+        echo
+        echo "Lease info"
+        ls -l /var/lib/dhclient/dhclient.lease
+        cat /var/lib/dhclient/dhclient.lease
+    ) | /usr/bin/ncftpput -t "$ftp_timeout" -m -c "$remote_host" "${filename}.info"
+
+
+    # Now, additionally, upload the big dump (with user pages)
+    echo
+    echo "Uploading the coredump with user + cache pages as well."
+    echo "If you don't want to wait you can reboot now"
+    echo
+    dump_and_transfer "${filename}.full" 17
+}
+
+
+echo
+echo "Starting pre-script"
+echo
+
+do_dhcp
+do_ftp
+
+# Sleep so we have time to see any error messages if we're debugging...
+sleep 10
+
+echo
+echo "Rebooting machine..."
+reboot -f
+

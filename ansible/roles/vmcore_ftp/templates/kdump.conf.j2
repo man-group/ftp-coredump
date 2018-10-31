@@ -1,0 +1,11 @@
+
+# This kdump config runs the pre-crash script (which sends a file with FTP), and then reboots.
+#
+# Note, the next comment line is useful as it makes kdump rebuild the initramfs if 
+# a machine moves to a different VLAN, or different interface name:
+#
+# Set up to use {{ ansible_default_ipv4['interface'] }}  (route {{ ansible_default_ipv4['gateway'] }})
+#
+extra_bins /usr/bin/ncftpput /usr/local/sbin/pre-crash.sh /usr/bin/uniq /usr/bin/sort /bin/sha1sum /bin/tee
+kdump_pre /usr/local/sbin/pre-crash.sh
+core_collector cat

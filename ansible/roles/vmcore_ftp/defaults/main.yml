@@ -1,0 +1,4 @@
+# FTP server to send crash dumps to
+crashdump_ftp_server: "my_anon_ftp_server"
+
+default_dns_servers: "my_internal_ip_1 my_internal_ip_2"
